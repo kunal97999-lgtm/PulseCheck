@@ -39,3 +39,27 @@ export async function list(req, res) {
     meta: { limit, offset },
   });
 }
+
+export async function update(req, res) {
+  const monitor = await monitorsService.updateMonitor(
+    req.user.id,
+    req.valid.params.id,
+    req.valid.body,
+  );
+  res.status(200).json({ data: { monitor: toResponse(monitor) } });
+}
+
+export async function pause(req, res) {
+  const monitor = await monitorsService.pauseMonitor(req.user.id, req.valid.params.id);
+  res.status(200).json({ data: { monitor: toResponse(monitor) } });
+}
+
+export async function resume(req, res) {
+  const monitor = await monitorsService.resumeMonitor(req.user.id, req.valid.params.id);
+  res.status(200).json({ data: { monitor: toResponse(monitor) } });
+}
+
+export async function remove(req, res) {
+  await monitorsService.deleteMonitor(req.user.id, req.valid.params.id);
+  res.status(204).end();
+}

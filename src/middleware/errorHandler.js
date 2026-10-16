@@ -7,7 +7,7 @@ export function notFoundHandler(req, res, next) {
 // Express recognizes error middleware by its 4 parameters: do not remove `next`.
 export function errorHandler(err, req, res, next) {
   if (res.headersSent) return next(err);
-
+  console.error('DEBUG ERROR:', err);
   let status = 500;
   let code = 'INTERNAL_ERROR';
   let message = 'Something went wrong';

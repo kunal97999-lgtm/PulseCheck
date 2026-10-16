@@ -6,6 +6,7 @@ const COLUMNS = `id, name, description, url, interval_seconds, timeout_ms,
   created_at, updated_at`;
 // user_id is deliberately not selected: it never leaves the data layer.
 
+/** Serializes concurrent creates for one user. Must be called inside a transaction. */
 export async function lockUser(userId, db) {
   await db.query(`SELECT id FROM users WHERE id = $1 FOR NO KEY UPDATE`, [userId]);
 }
@@ -34,9 +35,19 @@ export async function insert(userId, m, db = pool) {
   return rows[0];
 }
 
+/** Ownership is part of the query: someone else's monitor is simply "not found". */
 export async function findByIdForUser(id, userId, db = pool) {
   const { rows } = await db.query(
     `SELECT ${COLUMNS} FROM monitors WHERE id = $1 AND user_id = $2`,
+    [id, userId],
+  );
+  return rows[0] ?? null;
+}
+
+/** Row lock for read-modify-write. Must be called inside a transaction. */
+export async function findByIdForUserForUpdate(id, userId, db) {
+  const { rows } = await db.query(
+    `SELECT ${COLUMNS} FROM monitors WHERE id = $1 AND user_id = $2 FOR UPDATE`,
     [id, userId],
   );
   return rows[0] ?? null;
@@ -51,4 +62,80 @@ export async function listByUser(userId, { limit, offset }, db = pool) {
     [userId, limit, offset],
   );
   return rows;
+}
+
+/**
+ * Writes the full merged editable state. `resetState` is true when the URL changed.
+ * next_check_at rules:
+ *   paused            -> stays NULL
+ *   state was reset   -> due immediately
+ *   otherwise         -> never later than one (new) interval from now
+ */
+export async function update(id, userId, m, resetState, db = pool) {
+  const { rows } = await db.query(
+    `UPDATE monitors SET
+        name = $3, description = $4, url = $5,
+        interval_seconds = $6::int, timeout_ms = $7::int,
+        expected_status_min = $8::int, expected_status_max = $9::int,
+        failure_threshold = $10::int, recovery_threshold = $11::int,
+        current_status        = CASE WHEN $12::boolean THEN 'pending' ELSE current_status END,
+        consecutive_failures  = CASE WHEN $12::boolean THEN 0 ELSE consecutive_failures END,
+        next_check_at = CASE
+          WHEN NOT is_active   THEN NULL
+          WHEN $12::boolean    THEN now()
+          ELSE LEAST(next_check_at, now() + ($6::int * interval '1 second'))
+        END,
+        updated_at = now()
+      WHERE id = $1 AND user_id = $2
+      RETURNING ${COLUMNS}`,
+    [
+      id, userId, m.name, m.description, m.url, m.intervalSeconds, m.timeoutMs,
+      m.expectedStatusMin, m.expectedStatusMax, m.failureThreshold, m.recoveryThreshold,
+      resetState,
+    ],
+  );
+  return rows[0] ?? null;
+}
+
+/** Idempotent. updated_at only moves if something actually changed. */
+export async function pause(id, userId, db = pool) {
+  const { rows } = await db.query(
+    `UPDATE monitors SET
+        updated_at = CASE WHEN is_active THEN now() ELSE updated_at END,
+        is_active = false,
+        next_check_at = NULL
+      WHERE id = $1 AND user_id = $2
+      RETURNING ${COLUMNS}`,
+    [id, userId],
+  );
+  return rows[0] ?? null;
+}
+
+/**
+ * Idempotent. Every CASE sees the OLD row, so "was it paused?" is decided
+ * atomically inside this one statement. Resuming an active monitor changes nothing.
+ */
+export async function resume(id, userId, db = pool) {
+  const { rows } = await db.query(
+    `UPDATE monitors SET
+        current_status        = CASE WHEN is_active THEN current_status ELSE 'pending' END,
+        consecutive_failures  = CASE WHEN is_active THEN consecutive_failures ELSE 0 END,
+        consecutive_successes = CASE WHEN is_active THEN consecutive_successes ELSE 0 END,
+        next_check_at         = CASE WHEN is_active THEN next_check_at ELSE now() END,
+        updated_at            = CASE WHEN is_active THEN updated_at ELSE now() END,
+        is_active = true
+      WHERE id = $1 AND user_id = $2
+      RETURNING ${COLUMNS}`,
+    [id, userId],
+  );
+  return rows[0] ?? null;
+}
+
+/** Returns true if a row was deleted. Dependent rows cascade (results, incidents later). */
+export async function remove(id, userId, db = pool) {
+  const { rowCount } = await db.query(
+    `DELETE FROM monitors WHERE id = $1 AND user_id = $2`,
+    [id, userId],
+  );
+  return rowCount === 1;
 }
