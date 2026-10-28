@@ -5,8 +5,9 @@
 /** Row lock: serializes result handling per monitor and blocks concurrent DELETE. */
 export async function lockMonitorForResult(monitorId, db) {
   const { rows } = await db.query(
-    `SELECT id, current_status, consecutive_failures, consecutive_successes,
-            failure_threshold, recovery_threshold, last_checked_at
+    `SELECT id, is_active, current_status, consecutive_failures, consecutive_successes,
+            failure_threshold, recovery_threshold, last_checked_at, config_version,
+            failure_streak_started_at
        FROM monitors
       WHERE id = $1
         FOR UPDATE`,
@@ -31,24 +32,29 @@ export async function insertResult(monitorId, scheduledFor, r, db) {
   );
   return rows[0]?.id ?? null;
 }
-
 /** Deliberately does not touch updated_at: that column means "configuration changed". */
-export async function updateMonitorState(monitorId, state, checkedAt, db) {
+export async function updateMonitorState(monitorId, state, streakStartedAt, checkedAt, db) {
   await db.query(
     `UPDATE monitors SET
-        current_status        = $2::text,
-        consecutive_failures  = $3::int,
-        consecutive_successes = $4::int,
-        last_checked_at       = $5::timestamptz
+        current_status           = $2::text,
+        consecutive_failures     = $3::int,
+        consecutive_successes    = $4::int,
+        failure_streak_started_at = $5::timestamptz,
+        last_checked_at          = $6::timestamptz
       WHERE id = $1::uuid`,
-    [monitorId, state.status, state.consecutiveFailures, state.consecutiveSuccesses, checkedAt],
+    [
+      monitorId, state.status, state.consecutiveFailures, state.consecutiveSuccesses,
+      streakStartedAt, checkedAt,
+    ],
   );
 }
 
+  
 /** Plain read, no lock. Returns only what a check needs. */
 export async function findMonitorForCheck(monitorId, db) {
   const { rows } = await db.query(
-    `SELECT id, url, timeout_ms, expected_status_min, expected_status_max, is_active
+    `SELECT id, url, timeout_ms, expected_status_min, expected_status_max,
+            is_active, config_version
        FROM monitors
       WHERE id = $1`,
     [monitorId],

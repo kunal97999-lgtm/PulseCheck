@@ -1,7 +1,6 @@
 import { z } from 'zod';
 import { ALLOWED_PORTS } from '../checks/ssrf/targetPolicy.js';
 // Documented port policy. new URL() reports default ports (80 for http, 443 for https) as ''.
-const ALLOWED_PORTS = new Set(['', '80', '443', '8080', '8443']);
 const urlSchema = z
   .string()
   .trim()

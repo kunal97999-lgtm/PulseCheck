@@ -27,6 +27,31 @@ const schema = z.object({
   SCHEDULER_BATCH_SIZE: z.coerce.number().int().min(1).max(1000).default(100),
   CHECK_JOB_ATTEMPTS: z.coerce.number().int().min(1).max(10).default(3),
   CHECK_JOB_BACKOFF_MS: z.coerce.number().int().min(10).default(2000),
+
+  SMTP_HOST: z.string().min(1).default('127.0.0.1'),
+  SMTP_PORT: z.coerce.number().int().min(1).max(65535).default(1025),
+  SMTP_SECURE: z.enum(['true', 'false']).default('false').transform((v) => v === 'true'),
+  SMTP_USER: z.string().optional(),
+  SMTP_PASS: z.string().optional(),
+  MAIL_FROM: z.string().min(3).default('PulseCheck <alerts@pulsecheck.local>'),
+  NOTIFICATION_MAX_ATTEMPTS: z.coerce.number().int().min(1).max(10).default(5),
+  NOTIFICATION_BACKOFF_MS: z.coerce.number().int().min(10).default(5000),
+  NOTIFICATION_LEASE_SECONDS: z.coerce.number().int().min(5).default(60),
+  NOTIFICATION_SWEEP_MS: z.coerce.number().int().min(100).default(30000),
+  NOTIFICATION_STALE_SECONDS: z.coerce.number().int().min(1).default(120),
+
+  CHECK_RETENTION_DAYS: z.coerce.number().int().min(31).default(35),
+  INCIDENT_RETENTION_DAYS: z.coerce.number().int().min(1).default(90),
+  RETENTION_INTERVAL_MS: z.coerce.number().int().min(1000).default(3_600_000),
+  RETENTION_BATCH_SIZE: z.coerce.number().int().min(1).max(50000).default(5000),
+  RETENTION_MAX_BATCHES: z.coerce.number().int().min(1).default(200),
+  USER_API_MAX_PER_MINUTE: z.coerce.number().int().min(1).default(300),
+  USER_WRITE_MAX_PER_MINUTE: z.coerce.number().int().min(1).default(30),
+  OPS_TOKEN: z.string().min(32).optional(),
+  OPS_OVERDUE_SECONDS: z.coerce.number().int().min(30).default(300),
+  OPS_NOTIFICATION_LAG_SECONDS: z.coerce.number().int().min(60).default(900),
+  OPS_HEARTBEAT_MS: z.coerce.number().int().min(1000).default(10000),
+  OPS_WORKER_STALE_SECONDS: z.coerce.number().int().min(5).default(30),
 });
 
 const parsed = schema.safeParse(process.env);

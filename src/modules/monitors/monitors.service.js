@@ -2,7 +2,7 @@ import { env } from '../../config/env.js';
 import { withTransaction } from '../../db/pool.js';
 import { AppError, NotFoundError, ValidationError } from '../../utils/errors.js';
 import * as repo from './monitors.repository.js';
-
+import * as incidents from '../incidents/incidents.repository.js';
 export async function createMonitor(userId, input) {
   return withTransaction(async (client) => {
     await repo.lockUser(userId, client); // concurrent creates by this user queue up here
@@ -58,16 +58,29 @@ export async function updateMonitor(userId, monitorId, patch) {
     }
 
     // Both URLs are already normalized by the schema, so string equality is meaningful.
+
     const resetState = next.url !== current.url;
 
-    return repo.update(monitorId, userId, next, resetState, client);
+    const updated = await repo.update(monitorId, userId, next, resetState, client);
+    if (resetState) {
+      // The old target's outage says nothing about the new URL.
+      await incidents.resolveOpenIncident(monitorId, { reason: 'monitor_reconfigured' }, client);
+    }
+    return updated;
   });
 }
 
 export async function pauseMonitor(userId, monitorId) {
-  const monitor = await repo.pause(monitorId, userId);
-  if (!monitor) throw new NotFoundError('Monitor not found');
-  return monitor;
+  return withTransaction(async (client) => {
+    // Lock order: monitor first, then incident (same as recordCheckResult).
+    const current = await repo.findByIdForUserForUpdate(monitorId, userId, client);
+    if (!current) throw new NotFoundError('Monitor not found');
+
+    const monitor = await repo.pause(monitorId, userId, client);
+    // A paused monitor isn't observed, so an open incident would accrue fake downtime.
+    await incidents.resolveOpenIncident(monitorId, { reason: 'monitor_paused' }, client);
+    return monitor;
+  });
 }
 
 export async function resumeMonitor(userId, monitorId) {

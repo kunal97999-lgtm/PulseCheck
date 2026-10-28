@@ -8,6 +8,7 @@ export const pool = new pg.Pool({
   idleTimeoutMillis: 30_000,     // close connections idle for 30s
   connectionTimeoutMillis: 5_000, // fail fast if no connection is available
   query_timeout: 15_000,         // client-side cap so a hung query can't hang a request forever
+  idle_in_transaction_session_timeout: 30_000, // server kills transactions idle this long, releasing their locks
 });
 
 // Without this handler, an error on an IDLE connection (e.g. Postgres restarts)

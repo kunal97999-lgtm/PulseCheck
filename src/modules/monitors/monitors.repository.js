@@ -64,29 +64,30 @@ export async function listByUser(userId, { limit, offset }, db = pool) {
   return rows;
 }
 
-/**
- * Writes the full merged editable state. `resetState` is true when the URL changed.
- * next_check_at rules:
- *   paused            -> stays NULL
- *   state was reset   -> due immediately
- *   otherwise         -> never later than one (new) interval from now
- */
 export async function update(id, userId, m, resetState, db = pool) {
   const { rows } = await db.query(
     `UPDATE monitors SET
-        name = $3, description = $4, url = $5,
-        interval_seconds = $6::int, timeout_ms = $7::int,
-        expected_status_min = $8::int, expected_status_max = $9::int,
-        failure_threshold = $10::int, recovery_threshold = $11::int,
+        name = $3::text,
+        description = $4::text,
+        url = $5::text,
+        interval_seconds = $6::int,
+        timeout_ms = $7::int,
+        expected_status_min = $8::int,
+        expected_status_max = $9::int,
+        failure_threshold = $10::int,
+        recovery_threshold = $11::int,
         current_status        = CASE WHEN $12::boolean THEN 'pending' ELSE current_status END,
         consecutive_failures  = CASE WHEN $12::boolean THEN 0 ELSE consecutive_failures END,
+        consecutive_successes = CASE WHEN $12::boolean THEN 0 ELSE consecutive_successes END,
+        config_version        = CASE WHEN $12::boolean THEN config_version + 1 ELSE config_version END,
+         failure_streak_started_at = CASE WHEN $12::boolean THEN NULL ELSE failure_streak_started_at END,
         next_check_at = CASE
           WHEN NOT is_active   THEN NULL
           WHEN $12::boolean    THEN now()
           ELSE LEAST(next_check_at, now() + ($6::int * interval '1 second'))
         END,
         updated_at = now()
-      WHERE id = $1 AND user_id = $2
+      WHERE id = $1::uuid AND user_id = $2::uuid
       RETURNING ${COLUMNS}`,
     [
       id, userId, m.name, m.description, m.url, m.intervalSeconds, m.timeoutMs,
@@ -96,6 +97,7 @@ export async function update(id, userId, m, resetState, db = pool) {
   );
   return rows[0] ?? null;
 }
+
 
 /** Idempotent. updated_at only moves if something actually changed. */
 export async function pause(id, userId, db = pool) {
@@ -114,6 +116,8 @@ export async function pause(id, userId, db = pool) {
 /**
  * Idempotent. Every CASE sees the OLD row, so "was it paused?" is decided
  * atomically inside this one statement. Resuming an active monitor changes nothing.
+ * Resuming a paused one resets state AND bumps config_version, so a check that
+ * started before the pause can't write into the fresh state.
  */
 export async function resume(id, userId, db = pool) {
   const { rows } = await db.query(
@@ -121,6 +125,8 @@ export async function resume(id, userId, db = pool) {
         current_status        = CASE WHEN is_active THEN current_status ELSE 'pending' END,
         consecutive_failures  = CASE WHEN is_active THEN consecutive_failures ELSE 0 END,
         consecutive_successes = CASE WHEN is_active THEN consecutive_successes ELSE 0 END,
+        config_version        = CASE WHEN is_active THEN config_version ELSE config_version + 1 END,
+        failure_streak_started_at = CASE WHEN is_active THEN failure_streak_started_at ELSE NULL END,
         next_check_at         = CASE WHEN is_active THEN next_check_at ELSE now() END,
         updated_at            = CASE WHEN is_active THEN updated_at ELSE now() END,
         is_active = true
@@ -131,6 +137,7 @@ export async function resume(id, userId, db = pool) {
   return rows[0] ?? null;
 }
 
+
 /** Returns true if a row was deleted. Dependent rows cascade (results, incidents later). */
 export async function remove(id, userId, db = pool) {
   const { rowCount } = await db.query(
@@ -139,3 +146,4 @@ export async function remove(id, userId, db = pool) {
   );
   return rowCount === 1;
 }
+

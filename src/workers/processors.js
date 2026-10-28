@@ -6,43 +6,42 @@ import { logger } from '../utils/logger.js';
 // Job data lives in Redis, so it is validated like any other external input.
 const payloadSchema = z.object({
   monitorId: z.string().uuid(),
-  scheduledFor: z.string().datetime(), // ISO 8601, e.g. 2026-01-01T00:00:00.000Z
+  scheduledFor: z.string().datetime(),
 });
 
 /**
- * Builds the processor BullMQ calls for each job.
- * `deps` ({ lookup, policy }) are test seams; production passes nothing.
- *
+ * `deps`: { lookup?, policy?, notificationQueue? }. Production passes only notificationQueue.
  * Resolves for every case where the system did its job, including "target is down".
- * Throws only for problems a retry might fix, or UnrecoverableError for ones it can't.
  */
 export function createCheckProcessor(deps = {}) {
+  const { notificationQueue, ...checkDeps } = deps;
+
   return async function processCheckJob(job) {
     const parsed = payloadSchema.safeParse(job.data);
-    if (!parsed.success) {
-      // Retrying identical bad data cannot help. Fail immediately.
-      throw new UnrecoverableError('Invalid check job payload');
-    }
+    if (!parsed.success) throw new UnrecoverableError('Invalid check job payload');
     const { monitorId, scheduledFor } = parsed.data;
 
-    // scheduledFor is the slot the scheduler created. It is passed through
-    // untouched and never replaced by the clock.
-    const outcome = await checkAndRecord({ monitorId, scheduledFor }, deps);
+    const outcome = await checkAndRecord({ monitorId, scheduledFor }, checkDeps);
+
+    // Fast path, AFTER the commit. Best effort: the sweeper guarantees delivery,
+    // so a Redis problem here must never fail (and retry) a check that already succeeded.
+    const notification = outcome.incident?.notification;
+    if (notificationQueue && notification?.status === 'pending') {
+      try {
+        await notificationQueue.add('send', { deliveryId: notification.id }, { jobId: notification.id });
+      } catch (err) {
+        logger.error({ err, deliveryId: notification.id }, 'Could not enqueue notification; the sweeper will pick it up');
+      }
+    }
 
     logger.info(
       {
-        jobId: job.id,
-        monitorId,
-        attempt: job.attemptsMade + 1,
-        status: outcome.status,
-        success: outcome.result?.success,
-        errorType: outcome.result?.errorType,
+        jobId: job.id, monitorId, attempt: job.attemptsMade + 1, status: outcome.status,
+        success: outcome.result?.success, errorType: outcome.result?.errorType,
         latencyMs: outcome.result?.latencyMs,
       },
       'Check job finished',
     );
-
-    // Stored in Redis with the job, so keep it tiny.
     return { status: outcome.status };
   };
-}
+} 

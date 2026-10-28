@@ -2,8 +2,23 @@ import { Worker } from 'bullmq';
 import { CHECK_QUEUE } from '../queues/checkQueue.js';
 import { logger } from '../utils/logger.js';
 
-export function createCheckWorker({ connection, prefix, processor, concurrency }) {
-  const worker = new Worker(CHECK_QUEUE, processor, { connection, prefix, concurrency });
+export function createCheckWorker({
+  connection,
+  prefix,
+  processor,
+  concurrency,
+  lockDuration,
+  stalledInterval,
+  maxStalledCount,
+}) {
+  const worker = new Worker(CHECK_QUEUE, processor, {
+    connection,
+    prefix,
+    concurrency,
+    ...(lockDuration !== undefined && { lockDuration }),
+    ...(stalledInterval !== undefined && { stalledInterval }),
+    ...(maxStalledCount !== undefined && { maxStalledCount }),
+  });
 
   worker.on('error', (err) => {
     logger.error({ err }, 'Worker error');

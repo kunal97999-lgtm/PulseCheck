@@ -20,7 +20,7 @@ function normalizeSlot(value) {
  * Returns one of:
  *   { status: 'monitor_missing' }
  *   { status: 'skipped_inactive' }
- *   { status: 'duplicate' | 'recorded' | 'monitor_missing', ..., result }
+ *   { status: 'duplicate' | 'recorded' | 'monitor_missing' | 'stale_config', ..., result }
  * `deps` ({ lookup, policy }) are test seams; production passes nothing.
  */
 export async function checkAndRecord({ monitorId, scheduledFor }, deps = {}) {
@@ -43,7 +43,13 @@ export async function checkAndRecord({ monitorId, scheduledFor }, deps = {}) {
     deps,
   );
 
-  // Phase 3: short transaction. Idempotent on (monitorId, slot).
-  const outcome = await recordCheckResult({ monitorId, scheduledFor: slot, result });
+  // Phase 3: short transaction. Idempotent on (monitorId, slot), and discarded
+  // if the monitor's configuration was reset since Phase 1.
+  const outcome = await recordCheckResult({
+    monitorId,
+    scheduledFor: slot,
+    configVersion: monitor.config_version,
+    result,
+  });
   return { ...outcome, result };
 }

@@ -5,6 +5,7 @@ import * as authRepository from '../modules/auth/auth.repository.js';
 const BEARER = /^Bearer ([A-Za-z0-9_-]{43})$/;
 
 export async function requireAuth(req, res, next) {
+  if (req.user) return next();
   const match = BEARER.exec(req.headers.authorization ?? '');
   if (!match) {
     return next(new UnauthorizedError());
