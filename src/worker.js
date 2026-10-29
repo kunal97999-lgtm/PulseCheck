@@ -13,7 +13,7 @@ import { startScheduler } from './scheduler/loop.js';
 import { startNotificationSweeper } from './scheduler/notificationSweeper.js';
 import { startRetentionLoop } from './scheduler/retentionLoop.js';
 import { runRetention } from './modules/retention/retention.js';
-
+import { writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import { randomUUID } from 'node:crypto';
 import { startHeartbeat } from './workers/heartbeat.js';
@@ -69,12 +69,15 @@ const retention = startRetentionLoop({
     }),
 });
 
+const HEALTH_FILE = process.env.WORKER_HEALTH_FILE; // set only inside containers
 const heartbeat = startHeartbeat({
   redis: queueConn,
   prefix: env.QUEUE_PREFIX,
   workerId: `${os.hostname()}-${process.pid}-${randomUUID().slice(0, 8)}`,
   intervalMs: env.OPS_HEARTBEAT_MS,
+  onBeat: HEALTH_FILE ? () => writeFile(HEALTH_FILE, String(Date.now())) : undefined,
 });
+
 
 logger.info(
   { concurrency: env.WORKER_CONCURRENCY, prefix: env.QUEUE_PREFIX, tickMs: env.SCHEDULER_TICK_MS },

@@ -28,8 +28,69 @@ services:
   mailpit:
     image: axllent/mailpit
     ports:
-      - "1025:1025"   # SMTP (apps send here)
-      - "8025:8025"   # Web inbox UI
+      - "1025:1025"
+      - "8025:8025"
+
+  migrate:
+    build: .
+    profiles: ["app"]
+    command: ["npm", "run", "migrate:container", "--", "up"]
+    environment:
+      DATABASE_URL: postgres://pulsecheck:pulsecheck@postgres:5432/pulsecheck
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
+  api:
+    build: .
+    init: true
+    profiles: ["app"]
+    environment:
+      DATABASE_URL: postgres://pulsecheck:pulsecheck@postgres:5432/pulsecheck
+      REDIS_URL: redis://redis:6379
+      SMTP_HOST: mailpit
+      SMTP_PORT: "1025"
+      LOG_LEVEL: info
+      TRUST_PROXY_HOPS: "0"
+    ports:
+      - "3000:3000"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
+
+  worker:
+    build: .
+    init: true
+    profiles: ["app"]
+    command: ["node", "src/worker.js"]
+    stop_grace_period: 45s
+    environment:
+      DATABASE_URL: postgres://pulsecheck:pulsecheck@postgres:5432/pulsecheck
+      REDIS_URL: redis://redis:6379
+      SMTP_HOST: mailpit
+      SMTP_PORT: "1025"
+      LOG_LEVEL: info
+      WORKER_HEALTH_FILE: /tmp/worker-heartbeat
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "healthcheck-worker.js"]
+      interval: 15s
+      timeout: 3s
+      retries: 3
+      start_period: 20s
 
 volumes:
   pgdata:

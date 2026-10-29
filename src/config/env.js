@@ -52,6 +52,7 @@ const schema = z.object({
   OPS_NOTIFICATION_LAG_SECONDS: z.coerce.number().int().min(60).default(900),
   OPS_HEARTBEAT_MS: z.coerce.number().int().min(1000).default(10000),
   OPS_WORKER_STALE_SECONDS: z.coerce.number().int().min(5).default(30),
+  TRUST_PROXY_HOPS: z.coerce.number().int().min(0).max(5).default(0),
 });
 
 const parsed = schema.safeParse(process.env);

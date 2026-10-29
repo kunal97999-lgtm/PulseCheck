@@ -1,8 +1,28 @@
 name: CI
 
-on: [push, pull_request]
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run lint
+
   test:
     runs-on: ubuntu-latest
     services:
@@ -19,6 +39,15 @@ jobs:
           --health-interval 5s
           --health-timeout 3s
           --health-retries 10
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -26,5 +55,38 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
-      - run: npm run migrate:test up
-      - run: npm test
+      - name: Apply migrations to the test database
+        run: npm run migrate:test up
+      - name: Run all tests
+        run: npm test
+
+  docker:
+    runs-on: ubuntu-latest
+    needs: [lint, test]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build image
+        run: docker build -t pulsecheck:ci .
+      - name: Runs as a non-root user
+        run: |
+          uid=$(docker run --rm pulsecheck:ci id -u)
+          test "$uid" != "0"
+      - name: Contains no secrets, tests, or dev tools
+        run: |
+          docker run --rm pulsecheck:ci sh -c '
+            ls -a /app | grep -E "^\.env" && exit 1
+            test ! -d /app/tests
+            test ! -d /app/node_modules/vitest
+            test ! -d /app/node_modules/supertest
+            echo clean'
+
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Audit production dependencies
+        run: npm audit --omit=dev --audit-level=high
+        continue-on-error: true

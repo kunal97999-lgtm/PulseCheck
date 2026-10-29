@@ -39,8 +39,7 @@ const ops = env.OPS_TOKEN
         }),
     }
   : undefined;
-
-const app = createApp({ redis, ops });
+const app = createApp({ redis, ops, trustProxyHops: env.TRUST_PROXY_HOPS });
 
 const server = app.listen(env.PORT, () => {
   logger.info({ port: env.PORT, env: env.NODE_ENV, opsEnabled: Boolean(ops) }, 'API server listening');

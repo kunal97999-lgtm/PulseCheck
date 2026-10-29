@@ -32,11 +32,11 @@ function withTimeout(promise, ms) {
  * `redis` (an ioredis connection) is passed by server.js. When omitted (most
  * tests), rate limits use in-memory counters and /ready checks only Postgres.
  */
-export function createApp({ rateLimits, redis,ops } = {}) {
+export function createApp({ rateLimits, redis,ops,trustProxyHops = 0 } = {}) {
   const app = express();
 
   app.disable('x-powered-by');
-
+  app.set('trust proxy', trustProxyHops);
   app.use(
     pinoHttp({
       logger,
